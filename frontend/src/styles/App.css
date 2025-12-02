@@ -1,0 +1,43 @@
+/* Main App Styling */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f8f8f8;
+  color: #1a1a1a;
+}
+
+.loading {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 18px;
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.items-container {
+  margin: 0 auto;
+  padding: 40px 20px;
+  width: 100%;
+}
+
+.items-container h1 {
+  color: #c0392b;
+  margin-bottom: 30px;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.items-container p {
+  color: #666;
+  font-size: 16px;
+}
