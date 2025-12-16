@@ -1,0 +1,6 @@
+/frontend/node_modules/
+/backend/target/
+/frontend/build/
+.env
+.DS_Store
+/coverage/
