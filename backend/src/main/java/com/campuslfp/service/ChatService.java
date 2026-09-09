@@ -1,5 +1,7 @@
 package com.campuslfp.service;
 
+import com.campuslfp.exception.BadRequestException;
+import com.campuslfp.exception.ResourceNotFoundException;
 import com.campuslfp.model.*;
 import com.campuslfp.repository.ConversationRepository;
 import com.campuslfp.repository.ItemRepository;
@@ -21,26 +23,29 @@ public class ChatService {
     private final ItemRepository itemRepository;
 
     public Conversation startConversation(Long itemId, String otherUserEmail, String currentUserEmail) {
-        User userA = userRepository.findByEmail(currentUserEmail).orElseThrow();
-        User userB = userRepository.findByEmail(otherUserEmail).orElseThrow();
-        Item item = itemRepository.findById(itemId).orElseThrow();
-        // Check if conversation already exists (in any order)
-        return conversationRepository.findByItemIdAndUsers(itemId, userA.getId(), userB.getId())
-            .orElseGet(() -> conversationRepository.save(
-                Conversation.builder()
-                    .userA(userA)
-                    .userB(userB)
-                    .item(item)
-                    .createdAt(Instant.now())
-                    .approved(false)
-                    .blockedByA(false)
-                    .blockedByB(false)
-                    .build()
-            ));
+        User currentUser = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("Current user not found"));
+        User otherUser = userRepository.findByEmail(otherUserEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        Item item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
+
+        return conversationRepository.findByItemIdAndUsers(itemId, currentUser.getId(), otherUser.getId())
+                .orElseGet(() -> conversationRepository.save(
+                        Conversation.builder()
+                                .userA(currentUser)
+                                .userB(otherUser)
+                                .item(item)
+                                .createdAt(Instant.now())
+                                .approved(false)
+                                .blockedByA(false)
+                                .blockedByB(false)
+                                .build()));
     }
 
     public List<Conversation> getUserConversations(String userEmail) {
-        User user = userRepository.findByEmail(userEmail).orElseThrow();
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         return conversationRepository.findByUserAOrUserB(user, user);
     }
 
@@ -49,82 +54,100 @@ public class ChatService {
     }
 
     public Message sendMessage(Long conversationId, String text, String senderEmail) {
-        Conversation conversation = conversationRepository.findById(conversationId).orElseThrow();
-        User sender = userRepository.findByEmail(senderEmail).orElseThrow();
-        // Check blocking: if recipient has blocked the sender, prevent sending
-        User userA = conversation.getUserA();
-        User userB = conversation.getUserB();
-        boolean senderIsA = sender.getId().equals(userA.getId());
-        boolean senderIsB = sender.getId().equals(userB.getId());
-        if (!senderIsA && !senderIsB) throw new RuntimeException("Sender not part of conversation");
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
+        User sender = userRepository.findByEmail(senderEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // If the other party has blocked this sender, stop
-        if (senderIsA && conversation.isBlockedByB()) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "You are blocked");
+        if (!isParticipant(sender, conversation)) {
+            throw new BadRequestException("Sender not part of conversation");
         }
-        if (senderIsB && conversation.isBlockedByA()) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "You are blocked");
+        if (isBlockedByOtherUser(sender, conversation)) {
+            throw new BadRequestException("You are blocked");
+        }
+        if (!conversation.isApproved() && isApprovalBlocked(sender, conversationId)) {
+            throw new BadRequestException("Conversation pending approval");
         }
 
-        // Approval rules: if conversation not approved yet
-        if (!conversation.isApproved()) {
-            // Only allow the initiator (userA) to send the first single message
-            if (senderIsA) {
-                long sentCount = messageRepository.countByConversation_IdAndSender_Id(conversationId, sender.getId());
-                if (sentCount >= 1) {
-                    throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "Conversation pending approval");
-                }
-                // allow the first message
-            } else {
-                // recipient cannot send until they approve
-                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "Conversation pending approval");
-            }
-        }
-
-        Message msg = Message.builder()
+        Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
                 .content(text)
                 .sentAt(Instant.now())
                 .isRead(false)
                 .build();
-        return messageRepository.save(msg);
+        return messageRepository.save(message);
     }
 
     public Conversation approveConversation(Long conversationId, String approverEmail) {
-        Conversation conversation = conversationRepository.findById(conversationId).orElseThrow();
-        User approver = userRepository.findByEmail(approverEmail).orElseThrow();
-        // Only allow the recipient (userB) to approve if they are userB
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
+        User approver = userRepository.findByEmail(approverEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
         if (!approver.getId().equals(conversation.getUserB().getId())) {
-            throw new RuntimeException("Only the recipient can approve the conversation");
+            throw new BadRequestException("Only the recipient can approve the conversation");
         }
         conversation.setApproved(true);
         return conversationRepository.save(conversation);
     }
 
     public Conversation blockInConversation(Long conversationId, String blockerEmail) {
-        Conversation conversation = conversationRepository.findById(conversationId).orElseThrow();
-        User blocker = userRepository.findByEmail(blockerEmail).orElseThrow();
-        if (blocker.getId().equals(conversation.getUserA().getId())) {
-            conversation.setBlockedByA(true);
-        } else if (blocker.getId().equals(conversation.getUserB().getId())) {
-            conversation.setBlockedByB(true);
-        } else {
-            throw new RuntimeException("User not part of conversation");
-        }
+        Conversation conversation = findConversation(conversationId);
+        User blocker = findUser(blockerEmail);
+
+        updateBlockState(conversation, blocker, true);
         return conversationRepository.save(conversation);
     }
 
     public Conversation unblockInConversation(Long conversationId, String blockerEmail) {
-        Conversation conversation = conversationRepository.findById(conversationId).orElseThrow();
-        User blocker = userRepository.findByEmail(blockerEmail).orElseThrow();
-        if (blocker.getId().equals(conversation.getUserA().getId())) {
-            conversation.setBlockedByA(false);
-        } else if (blocker.getId().equals(conversation.getUserB().getId())) {
-            conversation.setBlockedByB(false);
-        } else {
-            throw new RuntimeException("User not part of conversation");
-        }
+        Conversation conversation = findConversation(conversationId);
+        User blocker = findUser(blockerEmail);
+
+        updateBlockState(conversation, blocker, false);
         return conversationRepository.save(conversation);
+    }
+
+    private Conversation findConversation(Long conversationId) {
+        return conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
+    }
+
+    private User findUser(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    private boolean isParticipant(User sender, Conversation conversation) {
+        return sender.getId().equals(conversation.getUserA().getId())
+                || sender.getId().equals(conversation.getUserB().getId());
+    }
+
+    private boolean isBlockedByOtherUser(User sender, Conversation conversation) {
+        boolean senderIsInitiator = sender.getId().equals(conversation.getUserA().getId());
+        boolean senderIsRecipient = sender.getId().equals(conversation.getUserB().getId());
+        return (senderIsInitiator && conversation.isBlockedByB())
+                || (senderIsRecipient && conversation.isBlockedByA());
+    }
+
+    private boolean isApprovalBlocked(User sender, Long conversationId) {
+        boolean senderIsInitiator = sender.getId().equals(conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation not found")).getUserA().getId());
+        if (!senderIsInitiator) {
+            return true;
+        }
+        return messageRepository.countByConversation_IdAndSender_Id(conversationId, sender.getId()) >= 1;
+    }
+
+    private void updateBlockState(Conversation conversation, User blocker, boolean blocked) {
+        if (blocker.getId().equals(conversation.getUserA().getId())) {
+            conversation.setBlockedByA(blocked);
+            return;
+        }
+        if (blocker.getId().equals(conversation.getUserB().getId())) {
+            conversation.setBlockedByB(blocked);
+            return;
+        }
+        throw new BadRequestException("User not part of conversation");
     }
 }

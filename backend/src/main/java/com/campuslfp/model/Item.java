@@ -1,5 +1,7 @@
 package com.campuslfp.model;
 
+import com.campuslfp.enums.ItemStatus;
+import com.campuslfp.enums.ItemType;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -41,7 +43,8 @@ public class Item {
     // Whether this item has been matched to another (settable by admins)
     private Boolean matched = false;
 
-    // Whether this item has been flagged for moderator review (can be set by any user)
+    // Whether this item has been flagged for moderator review (can be set by any
+    // user)
     private Boolean flagged = false;
 
     @ManyToOne

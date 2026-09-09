@@ -1,9 +1,13 @@
 package com.campuslfp.service;
 
-import com.campuslfp.dto.AuthResponse;
-import com.campuslfp.dto.LoginRequest;
-import com.campuslfp.dto.RegisterRequest;
-import com.campuslfp.model.Role;
+import com.campuslfp.dto.response.AuthResponse;
+import com.campuslfp.dto.request.LoginRequest;
+import com.campuslfp.dto.request.RegisterRequest;
+import com.campuslfp.exception.BadRequestException;
+import com.campuslfp.exception.ConflictException;
+import com.campuslfp.exception.ResourceNotFoundException;
+import com.campuslfp.mapper.RegistrationMapper;
+import com.campuslfp.mapper.UserMapper;
 import com.campuslfp.model.User;
 import com.campuslfp.repository.UserRepository;
 import com.campuslfp.security.CustomUserDetails;
@@ -15,10 +19,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
-
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -27,74 +27,64 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
+    private final UserMapper userMapper;
+    private final RegistrationMapper registrationMapper;
 
-    // Change this to your campus domain
-    private static final String CAMPUS_DOMAIN = "@college.edu";
+    private static final String CAMPUS_EMAIL_SUFFIX = "@college.edu";
 
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already in use");
+            throw new ConflictException("Email already in use");
         }
 
-        boolean verified = request.getEmail().toLowerCase().endsWith(CAMPUS_DOMAIN);
-
-        // Determine approval: educational emails auto-approved, others require admin approval
+        boolean verified = request.getEmail().toLowerCase().endsWith(CAMPUS_EMAIL_SUFFIX);
         boolean approved = verified;
 
-        // Basic server-side password strength validation (must contain digit, special char, upper and lower case)
-        String pwd = request.getPassword();
-        if (!isPasswordStrong(pwd)) {
-            throw new RuntimeException("Password must include uppercase, lowercase, number and a special character and be at least 6 characters long");
+        String rawPassword = request.getPassword();
+        if (!isPasswordStrong(rawPassword)) {
+            throw new BadRequestException(
+                    "Password must include uppercase, lowercase, number and a special character and be at least 6 characters long");
         }
 
-        if (!request.isTermsAccepted()) {
-            throw new RuntimeException("You must accept the terms and policy to register");
+        if (!Boolean.TRUE.equals(request.getTermsAccepted())) {
+            throw new BadRequestException("You must accept the terms and policy to register");
         }
 
-        User user = User.builder()
-                .name(request.getName())
-                .email(request.getEmail().toLowerCase())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .role(Role.ROLE_STUDENT)
-                .verified(verified)
-                .approved(approved)
-        .ignored(false)
-                .department(request.getDepartment())
-                .contactNo(request.getContactNo())
-                .termsAccepted(request.isTermsAccepted())
-                .createdAt(Instant.now())
-                .build();
+        User user = registrationMapper.toEntity(request);
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setVerified(verified);
+        user.setApproved(approved);
+        user.setCreatedAt(java.time.Instant.now());
 
         userRepository.save(user);
 
-        // Return response with approval status. 
-        // If approved, user can now login via /api/auth/login.
-        // If pending, user needs admin approval before they can login.
-        return new AuthResponse(null, user.getName(), user.getEmail(), user.getRole(), user.isVerified(), user.isApproved());
+        AuthResponse response = userMapper.toAuthResponse(user);
+        response.setToken(null);
+        return response;
     }
 
     public AuthResponse login(LoginRequest request) {
-        // Pre-check user status to provide clearer errors
-        userRepository.findByEmail(request.getEmail()).ifPresent(u -> {
-            if (u.isBlocked()) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You are blocked");
-            }
-            if (!u.isApproved()) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Pending admin approval");
-            }
-        });
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if (user.isBlocked()) {
+            throw new BadRequestException("You are blocked");
+        }
+        if (!user.isApproved()) {
+            throw new BadRequestException("Pending admin approval");
+        }
 
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
-                        request.getEmail(), request.getPassword()
-                )
-        );
+                        request.getEmail(), request.getPassword()));
 
         CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
-        User user = userDetails.getUser();
+        User authenticatedUser = userDetails.getUser();
         String token = jwtTokenProvider.generateToken(authentication);
 
-        return new AuthResponse(token, user.getName(), user.getEmail(), user.getRole(), user.isVerified(), user.isApproved());
+        AuthResponse response = userMapper.toAuthResponse(authenticatedUser);
+        response.setToken(token);
+        return response;
     }
 
     private boolean isPasswordStrong(String pwd) {

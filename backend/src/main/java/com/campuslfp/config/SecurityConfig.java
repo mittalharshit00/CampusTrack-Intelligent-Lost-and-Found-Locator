@@ -8,6 +8,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -17,6 +18,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -30,6 +36,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .httpBasic(basic -> basic.disable())
                 .formLogin(login -> login.disable())
@@ -37,11 +44,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        // Items endpoints - allow public read (list & details), but require auth for create/update/delete
+                        // Items endpoints - allow public read (list & details), but require auth for
+                        // create/update/delete
                         .requestMatchers(HttpMethod.GET, "/api/items").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/items/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/items").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/items/*/flag").authenticated()  // Allow flagging
+                        .requestMatchers(HttpMethod.POST, "/api/items/*/flag").authenticated() // Allow flagging
                         .requestMatchers(HttpMethod.PUT, "/api/items/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/items/**").authenticated()
                         // Chat endpoints - require authentication
@@ -50,12 +58,32 @@ public class SecurityConfig {
                         .requestMatchers("/api/analytics/**").authenticated()
                         // Admin endpoints - require ROLE_ADMIN (enforced via @PreAuthorize)
                         .requestMatchers("/api/admin/**").authenticated()
-                        .anyRequest().denyAll()
-                )
+                        .anyRequest().denyAll())
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of(
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:3002",
+                "http://localhost:3003",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "http://127.0.0.1:3002",
+                "http://127.0.0.1:3003"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 
     @Bean

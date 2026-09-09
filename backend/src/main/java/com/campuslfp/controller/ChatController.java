@@ -1,9 +1,11 @@
 package com.campuslfp.controller;
 
+import com.campuslfp.dto.request.ConversationCreateRequest;
+import com.campuslfp.dto.request.MessageCreateRequest;
 import com.campuslfp.model.Conversation;
 import com.campuslfp.model.Message;
 import com.campuslfp.service.ChatService;
-import lombok.Data;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -11,7 +13,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin(origins = "http://localhost:3000")
 @RestController
 @RequestMapping("/api/chat")
 @RequiredArgsConstructor
@@ -20,8 +21,10 @@ public class ChatController {
     private final ChatService chatService;
 
     @PostMapping("/conversations")
-    public ResponseEntity<Conversation> startConversation(@RequestBody StartConvDto dto, Authentication auth) {
-        Conversation conversation = chatService.startConversation(dto.getItemId(), dto.getOtherUserEmail(), auth.getName());
+    public ResponseEntity<Conversation> startConversation(@Valid @RequestBody ConversationCreateRequest request,
+            Authentication auth) {
+        Conversation conversation = chatService.startConversation(request.getItemId(), request.getOtherUserEmail(),
+                auth.getName());
         return ResponseEntity.ok(conversation);
     }
 
@@ -36,8 +39,9 @@ public class ChatController {
     }
 
     @PostMapping("/conversations/{id}/messages")
-    public ResponseEntity<Message> sendMessage(@PathVariable Long id, @RequestBody SendMsgDto dto, Authentication auth) {
-        return ResponseEntity.ok(chatService.sendMessage(id, dto.getContent(), auth.getName()));
+    public ResponseEntity<Message> sendMessage(@PathVariable Long id, @Valid @RequestBody MessageCreateRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(chatService.sendMessage(id, request.getContent(), auth.getName()));
     }
 
     @PostMapping("/conversations/{id}/approve")
@@ -53,13 +57,5 @@ public class ChatController {
     @PostMapping("/conversations/{id}/unblock")
     public ResponseEntity<Conversation> unblockConversation(@PathVariable Long id, Authentication auth) {
         return ResponseEntity.ok(chatService.unblockInConversation(id, auth.getName()));
-    }
-
-    @Data static class StartConvDto {
-        private Long itemId;
-        private String otherUserEmail;
-    }
-    @Data static class SendMsgDto {
-        private String content;
     }
 }

@@ -1,5 +1,6 @@
 package com.campuslfp.model;
 
+import com.campuslfp.enums.Role;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -32,10 +33,12 @@ public class User {
 
     private boolean verified;
 
-    // Whether this account has been approved/activated by an admin. Educational emails may be auto-approved.
+    // Whether this account has been approved/activated by an admin. Educational
+    // emails may be auto-approved.
     private boolean approved;
 
-    // Whether this account has been ignored by an admin (do not show in pending list)
+    // Whether this account has been ignored by an admin (do not show in pending
+    // list)
     private Boolean ignored = false;
 
     // Whether this account is blocked by an admin (cannot login)

@@ -1,1 +1,6 @@
+com/campuslfp/service/ItemServiceMatchTest.class
+com/campuslfp/mapper/MapperTest.class
+com/campuslfp/exception/GlobalExceptionHandlerTest.class
+com/campuslfp/exception/GlobalExceptionHandlerTest$TestRequest.class
+com/campuslfp/exception/GlobalExceptionHandlerTest$TestController.class
 com/campuslfp/backend/BackendApplicationTests.class
